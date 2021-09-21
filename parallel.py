@@ -11,7 +11,6 @@ import numpy as np
 # globals. We group these variables here for easy editing.
 # For variables that will only change rarely, it can be easier to place them here than enter them in as arguments every time we run the program.
 performance_log_file = 'performance_log.txt'
-number_of_processes = 1 # TODO(Dylan): accept as argument
 
 # simple usage output. TODO(Dylan): more descriptive, e.g. list and describe each argument
 def usage():
@@ -85,12 +84,12 @@ def vectors_equal(vec1, vec2):
 def split_matrix(mat, count):
     pass
 
-def reconstruct_split_matrices(mat):
+def reconstruct_split_matrices(mat,dims):
     pass
 
 def main(argv):
     # parse arguments. If we aren't able to parse them properly, remind the user of proper usage and quit
-    if len(argv) not in [2]: # check length. We use 'in' syntax in case we want to add optional arguments, in which case the length of the argument list might have more than one valid value
+    if len(argv) not in [3,4]: # check length. We use 'in' syntax in case we want to add optional arguments, in which case the length of the argument list might have more than one valid value
         usage()
         quit()
 
@@ -104,7 +103,13 @@ def main(argv):
         usage()
         quit()
 
-    size_x = int(argv[1])
+    number_of_processes = int(argv[1])
+
+    size_x = int(argv[2])
+    if len(argv) >= 4:
+        size_y = int(argv[3])
+    else:
+        size_y = 1
 
     # record and output start time for our records. This will be used to calculate total runtime
     start_time = time.time()
@@ -117,8 +122,8 @@ def main(argv):
         perf_log.write(f"\nStart time: {start_time_string}")
 
     # generate items
-    mat1 = generate_matrix(size_x)
-    mat2 = generate_vector(size_x)
+    mat1 = generate_matrix(size_x, size_y)
+    mat2 = generate_vector(size_x, size_y)
 
     # # we need to have some variables for synchronization in some scenarios
     # needs_synchronization = False
