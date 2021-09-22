@@ -3,10 +3,11 @@
 # This program is intended to demonstrate the performance potential of parallelism for certain tasks
 
 import sys      # accept arguments
-from multiprocessing import Process # use multiprocessing to improve throughput
+from multiprocessing import Process # use multiprocessing to improve throughput. TODO switch to threads to reduce memory requirements?
 import time # record execution time and provide estimates
 import random as rand
 import numpy as np
+import math # used for some calculations such as floor and log
 
 # globals. We group these variables here for easy editing.
 # For variables that will only change rarely, it can be easier to place them here than enter them in as arguments every time we run the program.
@@ -80,9 +81,48 @@ def matrices_equal(mat1, mat2):
 def vectors_equal(vec1, vec2):
     return matrices_equal(vec1, vec2)
 
-# split matrix 'mat' into 'count' matrices of approximately equal size
-def split_matrix(mat, count):
-    pass
+# split matrix of shape 'dims' into 'count' matrix dims of approximately equal size. This will represent the dims of the result matrix so they should be square if possible to minimize memory overhead
+def split_matrix(dims, count):
+    inner, outer = dims
+    # vector case
+    if outer == 1:
+        if inner % count == 0: # if we can evenly divide inner between all 'count' outputs
+            return (inner / count, 1) * count
+        else:
+            extras = inner % count # we have to distribute these extras
+            extra_element_distribution = []
+            for i in range(count): # replace with list comprehension?
+                if i < extras:
+                    extra_element_distribution.append(1) # we want to distribute the extras evenly instead of tacking them on to to the last element
+                else:
+                    extra_element_distribution.append(0)
+            return tuple([((inner / count) + extra_element_distribution[i],1) for i in range(count)])
+    else: # matrix case
+        # for now, we will only split into floor(sqrt(count)), which gives a square, to simplify splitting
+        squares = int(math.pow(math.floor(math.sqrt(count)),2)) # find the largest number of squares we can make with an integer sqrt
+        dim_divisor = int(round(math.sqrt(squares))) # we need to divide each dimension by this many to give our desired number of quadrants
+        if inner % dim_divisor == 0 and outer % dim_divisor == 0:
+            square_dims = (inner / dim_divisor, outer / dim_divisor) * squares
+            idle = (0,0) * (count - squares)
+            return tuple(list(square_dims).append(list(idle)))
+        else:
+            extras = inner % dim_divisor # we have to distribute these extras
+            inner_extra_element_distribution = []
+            for i in range(count): # replace with list comprehension?
+                if i < extras:
+                    inner_extra_element_distribution.append(1) # we want to distribute the extras evenly instead of tacking them on to to the last element
+                else:
+                    inner_extra_element_distribution.append(0)
+            extras = outer % dim_divisor # we have to distribute these extras
+            outer_extra_element_distribution = []
+            for i in range(count): # replace with list comprehension?
+                if i < extras:
+                    outer_extra_element_distribution.append(1) # we want to distribute the extras evenly instead of tacking them on to to the last element
+                else:
+                    outer_extra_element_distribution.append(0)
+            square_dims = tuple([((inner / dim_divisor) + inner_extra_element_distribution[i],(outer / dim_divisor) + outer_extra_element_distribution[i]) for i in range(squares)])
+            idle = (0,0) * (count - squares)
+            return tuple(list(square_dims).append(list(idle)))            
 
 def reconstruct_split_matrices(mat,dims):
     pass
@@ -105,11 +145,11 @@ def main(argv):
 
     number_of_processes = int(argv[1])
 
-    size_x = int(argv[2])
+    size_inner = int(argv[2])
     if len(argv) >= 4:
-        size_y = int(argv[3])
+        size_outer = int(argv[3])
     else:
-        size_y = 1
+        size_outer = 1
 
     # record and output start time for our records. This will be used to calculate total runtime
     start_time = time.time()
@@ -122,8 +162,8 @@ def main(argv):
         perf_log.write(f"\nStart time: {start_time_string}")
 
     # generate items
-    mat1 = generate_matrix(size_x, size_y)
-    mat2 = generate_vector(size_x, size_y)
+    mat1 = generate_matrix(size_inner, size_outer)
+    mat2 = generate_vector(size_inner, size_outer)
 
     # # we need to have some variables for synchronization in some scenarios
     # needs_synchronization = False
