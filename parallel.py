@@ -82,12 +82,12 @@ def vectors_equal(vec1, vec2):
     return matrices_equal(vec1, vec2)
 
 # split matrix of shape 'dims' into 'count' matrix dims of approximately equal size. This will represent the dims of the result matrix so they should be square if possible to minimize memory overhead
-def split_matrix(dims, count):
+def split_matrix_dims(dims, count):
     inner, outer = dims
     # vector case
     if outer == 1:
         if inner % count == 0: # if we can evenly divide inner between all 'count' outputs
-            return (inner / count, 1) * count
+            return tuple([(int(inner / count), 1)] * count)
         else:
             extras = inner % count # we have to distribute these extras
             extra_element_distribution = []
@@ -96,13 +96,13 @@ def split_matrix(dims, count):
                     extra_element_distribution.append(1) # we want to distribute the extras evenly instead of tacking them on to to the last element
                 else:
                     extra_element_distribution.append(0)
-            return tuple([((inner / count) + extra_element_distribution[i],1) for i in range(count)])
+            return tuple([tuple((int(inner / count)) + extra_element_distribution[i],1) for i in range(count)])
     else: # matrix case
         # for now, we will only split into floor(sqrt(count)), which gives a square, to simplify splitting
         squares = int(math.pow(math.floor(math.sqrt(count)),2)) # find the largest number of squares we can make with an integer sqrt
         dim_divisor = int(round(math.sqrt(squares))) # we need to divide each dimension by this many to give our desired number of quadrants
         if inner % dim_divisor == 0 and outer % dim_divisor == 0:
-            square_dims = (inner / dim_divisor, outer / dim_divisor) * squares
+            square_dims = (int(inner / dim_divisor), int(outer / dim_divisor)) * squares
             idle = (0,0) * (count - squares)
             return tuple(list(square_dims).append(list(idle)))
         else:
@@ -120,12 +120,43 @@ def split_matrix(dims, count):
                     outer_extra_element_distribution.append(1) # we want to distribute the extras evenly instead of tacking them on to to the last element
                 else:
                     outer_extra_element_distribution.append(0)
-            square_dims = tuple([((inner / dim_divisor) + inner_extra_element_distribution[i],(outer / dim_divisor) + outer_extra_element_distribution[i]) for i in range(squares)])
+            square_dims = tuple([tuple((int(inner / dim_divisor)) + inner_extra_element_distribution[i],(int(outer / dim_divisor)) + outer_extra_element_distribution[i]) for i in range(squares)])
             idle = (0,0) * (count - squares)
-            return tuple(list(square_dims).append(list(idle)))            
+            return tuple(list(square_dims).append(list(idle)))     
 
-def reconstruct_split_matrices(mat,dims):
-    pass
+# gets the two matrices that thread 'index' will 'multiply' together. The second matrix will be transposed
+def get_split_matrix(mat1, mat2_T, dims, index):
+    first_counter = 0
+    second_counter = 0
+    for dim in dims[:index]:
+        first, second = dim
+        first_counter += first
+        second_counter +=  #FIXME don't increment when we haven't rolled over yet
+    inner_dim, outer_dim = dims[index]
+    return_matrix1 = []
+    return_matrix2 = []
+    for i in range(second_counter, second_counter + outer_dim): # loop through outers
+        return_matrix1.append(mat1[i][first_counter: first_counter + inner_dim]) # grab the slice of the inners that we need
+        return_matrix2.append(mat2_T[i][first_counter: first_counter + inner_dim]) # mat2 is transposed, so it is the same shape
+
+    return (return_matrix1, return_matrix2)
+
+
+def reconstruct_split_matrices(matrices,original_dims):
+    inner, outer = original_dims
+    reconstructed_matrix = matrices[0] # use the first matrix as our building block
+    outer_offset = 0 # as we fill up blocks of inner matrices, we will need to index from a new 'zero'
+    for matrix in matrices[1:]: # skip the first matrix because we included it above
+        if len(matrix[outer_offset]) + len(reconstructed_matrix[0]) <= inner:
+            for i in range(len(matrix)): # for each inner matrix
+                reconstructed_matrix[outer_offset + i].append(matrix[i]) # append it to the existing inner matrices
+        else:
+            reconstructed_matrix.extend(matrix) # check append vs extend
+
+    return reconstructed_matrix
+
+def get_dims(matrix):
+    return (len(matrix[0]),len(matrix))
 
 def main(argv):
     # parse arguments. If we aren't able to parse them properly, remind the user of proper usage and quit
