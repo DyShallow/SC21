@@ -126,25 +126,28 @@ def split_matrix_dims(dims, count):
 
 # gets the two matrices that thread 'index' will 'multiply' together. The second matrix will be transposed
 def get_split_matrix(mat1, mat2_T, dims, index):
-    first_counter = 0
-    second_counter = 0
+    start_index = 0
+    inner_dim, outer_dim = dims[index]
     for dim in dims[:index]:
         first, second = dim
-        first_counter += first
-        second_counter +=  #FIXME don't increment when we haven't rolled over yet
-    inner_dim, outer_dim = dims[index]
+        start_index += first
+        if start_index % len(mat1[0]) == 0:
+            start_index += len(mat1[0]) * second
+    inner_start_index = start_index % len(mat1[0])
+    outer_start_index = math.floor(start_index / len(mat1[0]))
     return_matrix1 = []
     return_matrix2 = []
-    for i in range(second_counter, second_counter + outer_dim): # loop through outers
-        return_matrix1.append(mat1[i][first_counter: first_counter + inner_dim]) # grab the slice of the inners that we need
-        return_matrix2.append(mat2_T[i][first_counter: first_counter + inner_dim]) # mat2 is transposed, so it is the same shape
+    for i in range(outer_start_index, outer_start_index + outer_dim): # loop through outers
+        return_matrix1.append(mat1[i][inner_start_index: inner_start_index + inner_dim]) # grab the slice of the inners that we need
+        return_matrix2.append(mat2_T[i][inner_start_index: inner_start_index + inner_dim]) # mat2 is transposed, so it is the same shape
 
     return (return_matrix1, return_matrix2)
 
-
+#FIXME
 def reconstruct_split_matrices(matrices,original_dims):
     inner, outer = original_dims
-    reconstructed_matrix = matrices[0] # use the first matrix as our building block
+    reconstructed_matrix = []
+    reconstructed_matrix.extend(matrices[0]) # use the first matrix as our building block
     outer_offset = 0 # as we fill up blocks of inner matrices, we will need to index from a new 'zero'
     for matrix in matrices[1:]: # skip the first matrix because we included it above
         if len(matrix[outer_offset]) + len(reconstructed_matrix[0]) <= inner:
