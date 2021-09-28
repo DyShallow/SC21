@@ -41,9 +41,30 @@ class TestMatrixFunctions(unittest.TestCase):
         self.assertEqual(split_mat_dims, [(5,5),(5,5),(5,5),(5,5),(0,0)])
 
         split_mat_dims = parallel.split_matrix_dims(dims,9)
-        self.assertEqual(split_mat_dims, [(5,5),(5,5),(5,5),(5,5),(0,0)])
+        self.assertEqual(split_mat_dims, [(4, 4), (3, 4), (3, 4), (4, 3), (3, 3), (3, 3), (4, 3), (3, 3), (3, 3)])
 
+        split_mat_dims = parallel.split_matrix_dims(dims,10)
+        self.assertEqual(split_mat_dims, [(4, 4), (3, 4), (3, 4), (4, 3), (3, 3), (3, 3), (4, 3), (3, 3), (3, 3), (0, 0)])
 
+        mat = parallel.generate_matrix(dims[0], dims[1])
+        mat2 = parallel.generate_matrix(dims[0], dims[1])
 
+        # maybe replace this with parallel.matrix_multiply_prep
+        mat2_T = parallel.transpose(mat2)
+        mat2_T_numpy = parallel.transpose_numpy(mat2)
+        self.assertTrue(parallel.matrices_equal(mat2_T, mat2_T_numpy))
+
+        split_mats = []
+        for i in range(len(split_mat_dims)):
+            split_mats.append(parallel.get_split_matrix(mat,mat2_T,split_mat_dims,i))
+
+        result_mats = []
+        for mat, mat2_T in split_mats:
+            result_mats.append(parallel.multiply_matrix_elementwise(mat, mat2_T))
+
+        result = parallel.reconstruct_split_matrices(result_mats,dims)
+
+        self.assertTrue(parallel.matrices_equal(result, parallel.multiply_matrix_numpy(mat,mat2)))
+        
 if __name__ == '__main__':
     unittest.main()
