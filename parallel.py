@@ -17,8 +17,18 @@ performance_log_file = 'performance_log.txt'
 def usage():
     print(r'Usage: \npy .\python-filename.py [args]')
 
-def get_dims(matrix):
+def get_matrix_dims(matrix):
+    if len(matrix) == 0:
+        return (0,0)
     return (len(matrix[0]),len(matrix))
+
+def get_result_dims(mat1, mat2):
+    mat1_inner, mat1_outer = get_matrix_dims(mat1)
+    mat2_inner, mat2_outer = get_matrix_dims(mat2)
+    if mat1_inner != mat2_outer:
+        print("mat1 outer and mat2 inner dimensions must be the same")
+        quit()
+    return (mat1_outer, mat2_inner)
 
 def add_matrix(mat1, mat2):
     if not (len(mat1) == len(mat2) and len(mat1[0]) == len(mat2[0])): # validate inputs
@@ -39,13 +49,13 @@ def multiply_matrix_numpy(mat1, mat2):
     return np.matmul(mat1, mat2)
 
 def multiply_matrix(mat1, mat2_T):
-    inner1, outer1 = get_dims(mat1)
-    inner2, outer2 = get_dims(mat2_T)
-    result = [[0] * outer2] * outer1
+    inner1, outer1 = get_matrix_dims(mat1)
+    inner2, outer2 = get_matrix_dims(mat2_T)
+    result = [ [0 for _ in range(outer2)] for _ in range(outer1)] #[[0] * outer2] * outer1
     for i in range(outer1): # outer results
         for j in range(outer2): # inner results
             for k in range(inner1): # inner1 and inner2 are same
-                result[i][j] += mat1[k] * mat2_T[k]
+                result[i][j] += mat1[i][k] * mat2_T[j][k]
     return result
 
 # also known as Hadamard product. We do this because mat2 is already transposed
@@ -108,63 +118,65 @@ def vectors_equal(vec1, vec2):
 def split_matrix_dims(dims, count):
     inner, outer = dims
     # vector case
-    if outer == 1:
-        if inner % count == 0: # if we can evenly divide inner between all 'count' outputs
-            return [(int(inner / count), 1)] * count
-        else:
-            extras = inner % count # we have to distribute these extras
-            extra_element_distribution = []
-            for i in range(count): # replace with list comprehension?
-                if i < extras:
-                    extra_element_distribution.append(1) # we want to distribute the extras evenly instead of tacking them on to to the last element
-                else:
-                    extra_element_distribution.append(0)
-            return [tuple((int(inner / count)) + extra_element_distribution[i],1) for i in range(count)]
-    else: # matrix case
-        # for now, we will only split into floor(sqrt(count)), which gives a square, to simplify splitting
-        squares = int(math.pow(math.floor(math.sqrt(count)),2)) # find the largest number of squares we can make with an integer sqrt
-        dim_divisor = int(round(math.sqrt(squares))) # we need to divide each dimension by this many to give our desired number of quadrants
-        if inner % dim_divisor == 0 and outer % dim_divisor == 0:
-            square_dims = [(int(inner / dim_divisor), int(outer / dim_divisor))] * squares
-            idle = [(0,0)] * (count - squares)
-            square_dims.extend(idle)
-            return square_dims
-        else:
-            extras = inner % dim_divisor # we have to distribute these extras
-            inner_extra_element_distribution = []
-            for i in range(dim_divisor): # replace with list comprehension?
-                if i < extras:
-                    inner_extra_element_distribution.append(1) # we want to distribute the extras evenly instead of tacking them on to to the last element
-                else:
-                    inner_extra_element_distribution.append(0)
-            extras = outer % dim_divisor # we have to distribute these extras
-            outer_extra_element_distribution = []
-            for i in range(dim_divisor): # replace with list comprehension?
-                if i < extras:
-                    outer_extra_element_distribution.append(1) # we want to distribute the extras evenly instead of tacking them on to to the last element
-                else:
-                    outer_extra_element_distribution.append(0)
-            square_dims = [((int(inner / dim_divisor)) + inner_extra_element_distribution[j],(int(outer / dim_divisor)) + outer_extra_element_distribution[i]) for i in range(dim_divisor) for j in range(dim_divisor)] 
-            idle = [(0,0)] * (count - squares)
-            square_dims.extend(idle)
-            return square_dims
+    # if outer == 1:
+    #     if inner % count == 0: # if we can evenly divide inner between all 'count' outputs
+    #         return [(int(inner / count), 1)] * count
+    #     else:
+    #         extras = inner % count # we have to distribute these extras
+    #         extra_element_distribution = []
+    #         for i in range(count): # replace with list comprehension?
+    #             if i < extras:
+    #                 extra_element_distribution.append(1) # we want to distribute the extras evenly instead of tacking them on to to the last element
+    #             else:
+    #                 extra_element_distribution.append(0)
+    #         return [tuple((int(inner / count)) + extra_element_distribution[i],1) for i in range(count)]
+    # else: # matrix case
+    # for now, we will only split into floor(sqrt(count)), which gives a square, to simplify splitting
+    squares = int(math.pow(math.floor(math.sqrt(count)),2)) # find the largest number of squares we can make with an integer sqrt
+    dim_divisor = int(round(math.sqrt(squares))) # we need to divide each dimension by this many to give our desired number of quadrants
+    if inner % dim_divisor == 0 and outer % dim_divisor == 0:
+        square_dims = [(int(inner / dim_divisor), int(outer / dim_divisor))] * squares
+        idle = [(0,0)] * (count - squares)
+        square_dims.extend(idle)
+        return square_dims
+    else:
+        extras = inner % dim_divisor # we have to distribute these extras
+        inner_extra_element_distribution = []
+        for i in range(dim_divisor): # replace with list comprehension?
+            if i < extras:
+                inner_extra_element_distribution.append(1) # we want to distribute the extras evenly instead of tacking them on to to the last element
+            else:
+                inner_extra_element_distribution.append(0)
+        extras = outer % dim_divisor # we have to distribute these extras
+        outer_extra_element_distribution = []
+        for i in range(dim_divisor): # replace with list comprehension?
+            if i < extras:
+                outer_extra_element_distribution.append(1) # we want to distribute the extras evenly instead of tacking them on to to the last element
+            else:
+                outer_extra_element_distribution.append(0)
+        square_dims = [((int(inner / dim_divisor)) + inner_extra_element_distribution[j],(int(outer / dim_divisor)) + outer_extra_element_distribution[i]) for i in range(dim_divisor) for j in range(dim_divisor)] 
+        idle = [(0,0)] * (count - squares)
+        square_dims.extend(idle)
+        return square_dims
 
-# gets the two matrices that thread 'index' will 'multiply' together. The second matrix will be transposed. FIXME, this needs to give the whole relevant row, easy fix mabye
+# gets the two matrices that thread 'index' will 'multiply' together. The second matrix will be transposed. FIXME, this needs to give the right dimensions
 def get_split_matrix(mat1, mat2_T, dims, index):
     start_index = 0
     inner_dim, outer_dim = dims[index]
     for dim in dims[:index]:
-        first, second = dim
-        start_index += first
+        inner, outer = dim
+        start_index += inner
         if start_index % len(mat1[0]) == 0:
-            start_index += len(mat1[0]) * (second - 1)
-    inner_start_index = start_index % len(mat1[0])
-    outer_start_index = math.floor(start_index / len(mat1[0]))
+            start_index += len(mat1[0]) * (outer - 1)
+    mat1_outer_start_index = math.floor(start_index / len(mat1[0]))
+    mat2_outer_start_index = start_index % len(mat1[0])
     return_matrix1 = []
     return_matrix2 = []
-    for i in range(outer_start_index, outer_start_index + outer_dim): # loop through outers
-        return_matrix1.append(mat1[i][inner_start_index: inner_start_index + inner_dim]) # grab the slice of the inners that we need
-        return_matrix2.append(mat2_T[i][inner_start_index: inner_start_index + inner_dim]) # mat2 is transposed, so it is the same shape
+    for i in range(mat1_outer_start_index, mat1_outer_start_index + outer_dim): # loop through outers
+        return_matrix1.append(mat1[i]) # grab the whole inner
+        
+    for i in range(mat2_outer_start_index, mat2_outer_start_index + inner_dim):
+        return_matrix2.append(mat2_T[i]) # mat2 is transposed, so we grab the inner as well
 
     return (return_matrix1, return_matrix2)
 
@@ -174,18 +186,20 @@ def reconstruct_split_matrices(matrices,original_dims):
     reconstructed_matrix.extend(matrices[0]) # use the first matrix as our building block
     outer_offset = 0 # as we fill up blocks of inner matrices, we will need to index from a new 'zero'
     for matrix in matrices[1:]: # skip the first matrix because we included it above
-        if len(matrix[outer_offset]) + len(reconstructed_matrix[0]) <= inner:
+        if not matrix:
+            continue
+        if outer_offset + 1 < len(reconstructed_matrix): # if we won't exceed the dimensions of our matrix by tacking on more to the existing inners
             for i in range(len(matrix)): # for each inner matrix
                 reconstructed_matrix[outer_offset + i].extend(matrix[i]) # append it to the existing inner matrices
+            if len(reconstructed_matrix[outer_offset]) == inner: # once we fill up the inners, we need to adjust the outer_offset
+                outer_offset += len(matrix)
         else:
             reconstructed_matrix.extend(matrix)
 
     return reconstructed_matrix
 
 def multiply_matrix_prep(mat1, mat2, process_count):
-    dims = get_dims(mat1)
-    if dims != get_dims(mat2):
-        print("Matrix dims are not the same!")
+    dims = get_result_dims(mat1, mat2)
 
     split_dims = split_matrix_dims(dims,process_count)
     mat2_T = transpose(mat2)
