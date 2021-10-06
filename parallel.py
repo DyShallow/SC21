@@ -2,8 +2,10 @@
 # SC21 student outreach workshop
 # This program is intended to demonstrate the performance potential of parallelism for certain tasks
 
+from os import name
 import sys      # accept arguments
-from multiprocessing import Process # use multiprocessing to improve throughput. TODO switch to threads to reduce memory requirements?
+import argparse # parse arguments
+import multiprocessing # use multiprocessing to improve throughput. TODO switch to threads to reduce memory requirements?
 import time # record execution time and provide estimates
 import random as rand
 import numpy as np
@@ -12,30 +14,37 @@ import math # used for some calculations such as floor and log
 # globals. We group these variables here for easy editing.
 # For variables that will only change rarely, it can be easier to place them here than enter them in as arguments every time we run the program.
 performance_log_file = 'performance_log.txt'
+usage_string = '' # set using argparse in main
 
 # simple usage output. TODO(Dylan): more descriptive, e.g. list and describe each argument
 def usage():
-    print(r'Usage: \npy .\python-filename.py [args]')
+    print(usage_string)
 
 def get_matrix_dims(matrix):
     if len(matrix) == 0:
         return (0,0)
     return (len(matrix[0]),len(matrix))
 
-def get_result_dims(mat1, mat2):
+def get_result_dims(mat1, mat2, transposition_required):
     mat1_inner, mat1_outer = get_matrix_dims(mat1)
     mat2_inner, mat2_outer = get_matrix_dims(mat2)
-    if mat1_inner != mat2_outer:
-        print("mat1 outer and mat2 inner dimensions must be the same")
-        quit()
-    return (mat1_outer, mat2_inner)
+    if transposition_required:
+        if mat1_inner != mat2_outer:
+            print("mat1 outer and mat2 inner dimensions must be the same")
+            quit()
+        return (mat1_outer, mat2_inner)
+    else:
+        if (mat1_inner, mat1_outer) != (mat2_inner, mat2_outer):
+            print("mat1 and mat2 dimensions must be the same")
+            quit()
+        return (mat1_inner, mat1_outer)
 
-def add_matrix(mat1, mat2):
-    if not (len(mat1) == len(mat2) and len(mat1[0]) == len(mat2[0])): # validate inputs
+def add_matrix(mat1, mat2_T):
+    if not (len(mat1) == len(mat2_T) and len(mat1[0]) == len(mat2_T[0])): # validate inputs
         print('Matrices are not of the same size, cannot add them')
         quit()
     result = []
-    for inner_1,inner_2 in zip(mat1, mat2): # for each pair of lists in the outer list of each matrix
+    for inner_1,inner_2 in zip(mat1, mat2_T): # for each pair of lists in the outer list of each matrix
         inner_result = []
         for i,j in zip(inner_1,inner_2): # might be able to replace with list comprehension
             inner_result.append(i + j)
@@ -160,7 +169,7 @@ def split_matrix_dims(dims, count):
         return square_dims
 
 # gets the two matrices that thread 'index' will 'multiply' together. The second matrix will be transposed. FIXME, this needs to give the right dimensions
-def get_split_matrix(mat1, mat2_T, dims, index):
+def get_split_matrix(mat1, mat2_T, dims, index, mat2_is_transposed):
     start_index = 0
     inner_dim, outer_dim = dims[index]
     for dim in dims[:index]:
@@ -174,9 +183,12 @@ def get_split_matrix(mat1, mat2_T, dims, index):
     return_matrix2 = []
     for i in range(mat1_outer_start_index, mat1_outer_start_index + outer_dim): # loop through outers
         return_matrix1.append(mat1[i]) # grab the whole inner
-        
-    for i in range(mat2_outer_start_index, mat2_outer_start_index + inner_dim):
-        return_matrix2.append(mat2_T[i]) # mat2 is transposed, so we grab the inner as well
+        if not mat2_is_transposed:
+            return_matrix2.append(mat2_T[i]) # if mat2 is not transposed, we can treat it like mat1
+    
+    if mat2_is_transposed: # if mat2 is transposed, we must treat it differently
+        for i in range(mat2_outer_start_index, mat2_outer_start_index + inner_dim):
+            return_matrix2.append(mat2_T[i]) # mat2 is transposed, so we grab the inner as well
 
     return (return_matrix1, return_matrix2)
 
@@ -198,41 +210,51 @@ def reconstruct_split_matrices(matrices,original_dims):
 
     return reconstructed_matrix
 
-def multiply_matrix_prep(mat1, mat2, process_count):
-    dims = get_result_dims(mat1, mat2)
+# split matrices into smaller parts which will be used by workers
+def split_work(mat1, mat2, process_count, transpose_result):
+    dims = get_result_dims(mat1, mat2, transpose_result)
 
     split_dims = split_matrix_dims(dims,process_count)
-    mat2_T = transpose(mat2)
+    if transpose_result:
+        mat2_T = transpose(mat2)
+    else:
+        mat2_T = mat2 # TODO make variable name mat2_T less confusing in cases where it's not actually transposed
     split_mats = []
     for i in range(len(split_dims)):
-        split_mats.append(get_split_matrix(mat1,mat2_T,split_dims,i))
+        split_mats.append(get_split_matrix(mat1,mat2_T,split_dims,i,transpose_result))
 
     return split_mats
     
+def execute_task(id, task_function, shared_dict, mat1, mat2_T):
+    if mat1 and mat2_T: # if we have work to do
+        shared_dict[id] = task_function(mat1, mat2_T)
+    return
 
 def main(argv):
-    # parse arguments. If we aren't able to parse them properly, remind the user of proper usage and quit
-    if len(argv) not in [3,4]: # check length. We use 'in' syntax in case we want to add optional arguments, in which case the length of the argument list might have more than one valid value
-        usage()
-        quit()
+    # Parse arguments
+    parser = argparse.ArgumentParser(prog='parallel.py',
+                                    description='Demonstrate performance characteristics of parallel processing')
 
     # Use function pointers so that we can re-use the code which handles parallelism
     tasks = ['add_vector', 'multiply_vector', 'add_matrix', 'multiply_matrix'] # supported operations
     task_functions = [add_vector, multiply_vector, add_matrix, multiply_matrix] # functions corresponding to tasks
-    if(argv[0] in tasks):
-        function_pointer = task_functions[tasks.index(argv[0])]
-    else:
-        print(f'Invalid task specified! {argv[0]}')
-        usage()
-        quit()
+    parser.add_argument('task', choices=tasks, help='Specify what kind of matrix operation to try')
 
-    number_of_processes = int(argv[1])
+    parser.add_argument('process_count', type=int, help='How many worker processes to use')
 
-    size_inner = int(argv[2])
-    if len(argv) >= 4:
-        size_outer = int(argv[3])
-    else:
-        size_outer = 1
+    parser.add_argument('matrix_size_inner', type=int, help='Size of matrix in terms of inner list size')
+
+    parser.add_argument('matrix_size_outer', nargs='?', type=int, default=1, help='Size of matrix in terms of outer list size (optional)')
+
+    args = parser.parse_args(argv)
+
+    function_pointer = task_functions[tasks.index(args.task)] # already validated by argparse
+
+    number_of_processes = args.process_count
+
+    size_inner = args.matrix_size_inner
+
+    size_outer = args.matrix_size_outer
 
     # record and output start time for our records. This will be used to calculate total runtime
     start_time = time.time()
@@ -244,20 +266,28 @@ def main(argv):
             perf_log.write('\n' + arg)
         perf_log.write(f"\nStart time: {start_time_string}")
 
-    # generate items
+    # generate items. For now we assume they are the same size TODO, support non-identical matrices
     mat1 = generate_matrix(size_inner, size_outer)
-    mat2 = generate_vector(size_inner, size_outer)
+    mat2 = generate_matrix(size_inner, size_outer)
 
-    # # we need to have some variables for synchronization in some scenarios
-    # needs_synchronization = False
-    # if needs_synchronization:
-    #     manager = multiprocessing.Manager()
-    #     shared_dict = manager.dict()
+    if task_functions.index(function_pointer) in [1, 3]: # need to transpose mat2 for matrix/vector multiplication
+        needs_transposition = True
+    else:
+        needs_transposition = False
+
+    result_dims = get_result_dims(mat1, mat2, needs_transposition)
+
+    # # For more complex optimization, we might need to have some more synchronization
+    manager = multiprocessing.Manager()
+    shared_dict = manager.dict() # Processes will write their results to this list
+
+    # Split up the work for each of the workers
+    input_matrices = split_work(mat1, mat2, number_of_processes, transpose_result=needs_transposition)
 
     # start worker processes to perform the work
     workers = []
-    for _ in range(number_of_processes): # underscore indicates we do not care about the iterator variable itself
-        workers.append(Process(target=function_pointer, args=(mat1, mat2,))) # prepare workers
+    for i in range(number_of_processes): # underscore indicates we do not care about the iterator variable itself
+        workers.append(multiprocessing.Process(target=execute_task, args=(i, function_pointer, shared_dict, input_matrices[i][0], input_matrices[i][1],))) # prepare workers
     for worker in workers:
         worker.start() # start workers
 
@@ -265,6 +295,17 @@ def main(argv):
     for worker in workers:
         worker.join()
     print('All processes joined!') # report all processes joined. If we don't get here, maybe one of the workers got stuck
+
+    worker_results = []
+    for i in range(number_of_processes):
+        if i in shared_dict:
+            worker_results.append(shared_dict[i])
+
+    # recombine results
+    result = reconstruct_split_matrices(worker_results, result_dims)
+
+    if get_matrix_dims(result) != result_dims:
+        print('Dimension error')
 
     # output and record end and elapsed time
     end_time = time.time()
@@ -280,4 +321,4 @@ def main(argv):
     
 
 if __name__ == "__main__":
-   main(sys.argv[1:]) # strip implicit first argument, we only care about user-specified args
+   main(sys.argv[1:]) # strip implicit first argument, we only care about user-specified args. Note, this breaks default behavior of argparse which uses sys.argv[0] as the name of our program.
