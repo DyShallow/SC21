@@ -79,7 +79,7 @@ class TestMatrixFunctions(unittest.TestCase):
                 
                 result_outer_size, matching_size, result_inner_size = dims
 
-                # generate items. For now we assume they are the same size TODO, support non-identical matrices
+                # generate matrices
                 mat1 = parallel.generate_matrix(matching_size, result_inner_size)
                 
                 if ii == 1: # need to transpose mat2 for multiplication
