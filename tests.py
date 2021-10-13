@@ -16,27 +16,6 @@ class TestMatrixFunctions(unittest.TestCase):
         mats_equal = parallel.matrices_equal(mat1_T, mat1_T_np)
         self.assertTrue(mats_equal)
 
-    def test_vector(self):
-        matrix_size = 10
-        split_count = 2
-        vec = parallel.generate_vector(matrix_size)
-        vec2 = parallel.transpose(parallel.generate_vector(matrix_size))
-        split_vec_dims = parallel.split_matrix_dims(parallel.get_result_dims(vec, vec2, True),split_count)
-        self.assertEqual(split_vec_dims,[(1,1),(0,0)])
-
-        vec2_T = parallel.transpose(vec2)
-        split_mats = []
-        for i in range(len(split_vec_dims)):
-            split_mats.append(parallel.get_split_matrix(vec,vec2_T,split_vec_dims,i, True))
-
-        result_mats = []
-        for mat, mat2_T in split_mats:
-            result_mats.append(parallel.multiply_matrix(mat, mat2_T))
-
-        result = parallel.reconstruct_split_matrices(result_mats,split_vec_dims)
-
-        self.assertTrue(parallel.matrices_equal(result, parallel.multiply_matrix_numpy(vec,vec2)))
-
     def test_matrix(self):
         generated_size = (10,10)
         split_count = 4
@@ -62,7 +41,7 @@ class TestMatrixFunctions(unittest.TestCase):
 
         split_mats = []
         for i in range(len(split_mat_dims)):
-            split_mats.append(parallel.get_split_matrix(mat,mat2_T,split_mat_dims,i,True))
+            split_mats.append(parallel.get_split_matrix(mat,mat2_T,dims2,split_mat_dims,i,True))
 
         result_mats2 = []
         for mat_slice, mat2_T_slice in split_mats:
@@ -72,61 +51,82 @@ class TestMatrixFunctions(unittest.TestCase):
 
         self.assertTrue(parallel.matrices_equal(result2, parallel.multiply_matrix_numpy(mat,mat2)))
 
+    def generate_test_dims(self, count, rand_max):
+        dims = []
+        # some vectors
+        vector_count = int(count / 10) + 1
+        for _ in range(vector_count):
+            dims.append((1, random.randint(1,rand_max), 1))
+        
+        # matrices
+        for _ in range(count - vector_count):
+            dims.append((random.randint(1,rand_max), random.randint(1,rand_max), random.randint(1,rand_max)))
+
+        return dims
+        
     def test_simulated_workflow(self):
         # setup
-        size_inner = 10
-        size_outer = 10
+        
         number_of_processes = 10
-        task_functions = [parallel.add_vector, parallel.multiply_vector, parallel.add_matrix, parallel.multiply_matrix]
-        numpy_functions = [parallel.add_vector_numpy, parallel.multiply_vector_numpy, parallel.add_matrix_numpy, parallel.multiply_matrix_numpy]
+        task_functions = [parallel.add_matrix, parallel.multiply_matrix]
+        numpy_functions = [parallel.add_matrix_numpy, parallel.multiply_matrix_numpy]
 
-        for i in range(3,len(task_functions)): # only tests matrix mul right now. TODO fix split_work to correctly distribute work for additions. TODO use size_outer of 1 for vector scenarios
-            function_pointer = task_functions[i]
-            
-            # generate items. For now we assume they are the same size TODO, support non-identical matrices
-            mat1 = parallel.generate_matrix(size_inner, size_outer)
-            mat2 = parallel.generate_matrix(size_inner, size_outer)
+        test_dims = self.generate_test_dims(10, 20) # generate 10 sets of dims, max dim of 20
 
-            numpy_result = numpy_functions[i](mat1, mat2)
+        for ii in range(1,len(task_functions)): # TODO hard-code some special cases like 1-dimensional stuff (vector)
+            for dims in test_dims:    
+                function_pointer = task_functions[ii]
+                
+                result_outer_size, matching_size, result_inner_size = dims
 
-            if task_functions.index(function_pointer) in [1, 3]: # need to transpose mat2 for matrix/vector multiplication
-                needs_transposition = True
-            else:
-                needs_transposition = False
+                # generate items. For now we assume they are the same size TODO, support non-identical matrices
+                mat1 = parallel.generate_matrix(matching_size, result_inner_size)
+                
+                if ii == 1: # need to transpose mat2 for multiplication
+                    needs_transposition = True
+                    mat2 = parallel.generate_matrix(result_outer_size, matching_size)
+                else:
+                    needs_transposition = False
+                    mat2 = parallel.generate_matrix(matching_size, result_inner_size) # re-use mat1 dims in addition case
 
-            result_dims = parallel.get_result_dims(mat1, mat2, needs_transposition)
+                numpy_result = numpy_functions[ii](mat1, mat2)
 
-            # # For more complex optimization, we might need to have some more synchronization
-            manager = multiprocessing.Manager()
-            shared_dict = manager.dict() # Processes will write their results to this list
+                result_dims = parallel.get_result_dims(mat1, mat2, needs_transposition)
 
-            # Split up the work for each of the workers
-            input_matrices = parallel.split_work(mat1, mat2, number_of_processes, transpose_result=needs_transposition)
+                self.assertEqual(parallel.get_matrix_dims(numpy_result), result_dims)
 
-            # start worker processes to perform the work
-            workers = []
-            for i in range(number_of_processes): # underscore indicates we do not care about the iterator variable itself
-                workers.append(multiprocessing.Process(target=parallel.execute_task, args=(i, function_pointer, shared_dict, input_matrices[i][0], input_matrices[i][1],))) # prepare workers
-            for worker in workers:
-                worker.start() # start workers
+                # # For more complex optimization, we might need to have some more synchronization
+                manager = multiprocessing.Manager()
+                shared_dict = manager.dict() # Processes will write their results to this list
 
-            # join processes
-            for worker in workers:
-                worker.join()
-            print('All processes joined!') # report all processes joined. If we don't get here, maybe one of the workers got stuck
+                # Split up the work for each of the workers
+                input_matrices = parallel.split_work(mat1, mat2, number_of_processes, transpose_result=needs_transposition)
 
-            worker_results = []
-            for i in range(number_of_processes):
-                if i in shared_dict:
-                    worker_results.append(shared_dict[i])
+                # start worker processes to perform the work
+                workers = []
+                for i in range(number_of_processes): # underscore indicates we do not care about the iterator variable itself
+                    workers.append(multiprocessing.Process(target=parallel.execute_task, args=(i, function_pointer, shared_dict, input_matrices[i][0], input_matrices[i][1],))) # prepare workers
+                for worker in workers:
+                    worker.start() # start workers
 
-            # recombine results
-            result = parallel.reconstruct_split_matrices(worker_results, result_dims)
+                # join processes
+                for worker in workers:
+                    worker.join()
+                #print('All processes joined!') # report all processes joined. If we don't get here, maybe one of the workers got stuck
 
-            if parallel.get_matrix_dims(result) != result_dims:
-                print('Dimension error')
+                worker_results = []
+                for i in range(number_of_processes):
+                    if i in shared_dict:
+                        worker_results.append(shared_dict[i])
 
-            self.assertTrue(parallel.matrices_equal(numpy_result, result))
+                # recombine results
+                result = parallel.reconstruct_split_matrices(worker_results, result_dims)
+
+                self.assertTrue(parallel.get_matrix_dims(result), result_dims)
+
+                #matching_elements = [[np == r for np,r in zip(np_arr, r_arr)] for np_arr, r_arr in zip(numpy_result, result)]
+
+                self.assertTrue(parallel.matrices_equal(numpy_result, result))
 
         
 if __name__ == '__main__':
