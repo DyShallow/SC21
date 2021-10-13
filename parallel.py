@@ -20,6 +20,7 @@ usage_string = '' # set using argparse in main
 def usage():
     print(usage_string)
 
+# returns (inner, outer)
 def get_matrix_dims(matrix):
     if len(matrix) == 0:
         return (0,0)
@@ -32,7 +33,7 @@ def get_result_dims(mat1, mat2, transposition_required):
         if mat1_inner != mat2_outer:
             print("mat1 outer and mat2 inner dimensions must be the same")
             quit()
-        return (mat1_outer, mat2_inner)
+        return (mat2_inner, mat1_outer)
     else:
         if (mat1_inner, mat1_outer) != (mat2_inner, mat2_outer):
             print("mat1 and mat2 dimensions must be the same")
@@ -99,49 +100,17 @@ def generate_matrix(size_inner, size_outer=1, seed=None):
         generated_matrix.append(inner_list)
     return generated_matrix
 
-def generate_vector(size, seed=None):
-    return generate_matrix(size_inner=size, seed=seed)
-
-def add_vector(vec1, vec2): # TODO(Dylan): Maybe make these matrices and check dimensionality so that we avoid confusion of passing 'mat' to 'vec' in the worker prepare step
-    return add_matrix(vec1, vec2)
-
-def add_vector_numpy(vec1, vec2):
-    return np.add(vec1, vec2)
-
-def multiply_vector(vec1, vec2):
-    result = 0
-    for element1, element2 in zip(vec1, vec2):
-        result += element1 * element2
-    return result
-
-def multiply_vector_numpy(vec1, vec2):
-    return multiply_matrix_numpy(vec1, vec2)
-
 def matrices_equal(mat1, mat2):
     return np.equal(mat1, mat2).all()
 
-def vectors_equal(vec1, vec2):
-    return matrices_equal(vec1, vec2)
-
-# split matrix of shape 'dims' into 'count' matrix dims of approximately equal size. This will represent the dims of the result matrix so they should be square if possible to minimize memory overhead
+# split matrix of shape 'dims' into 'count' matrix dims of approximately equal size. This will represent the dims of the result matrix so they should be square if possible to minimize memory overhead. TODO fix to be more efficient, right now it's not favoring larger matrix
 def split_matrix_dims(dims, count):
     inner, outer = dims
-    # vector case
-    # if outer == 1:
-    #     if inner % count == 0: # if we can evenly divide inner between all 'count' outputs
-    #         return [(int(inner / count), 1)] * count
-    #     else:
-    #         extras = inner % count # we have to distribute these extras
-    #         extra_element_distribution = []
-    #         for i in range(count): # replace with list comprehension?
-    #             if i < extras:
-    #                 extra_element_distribution.append(1) # we want to distribute the extras evenly instead of tacking them on to to the last element
-    #             else:
-    #                 extra_element_distribution.append(0)
-    #         return [tuple((int(inner / count)) + extra_element_distribution[i],1) for i in range(count)]
-    # else: # matrix case
+
     # for now, we will only split into floor(sqrt(count)), which gives a square, to simplify splitting
-    squares = int(math.pow(math.floor(math.sqrt(count)),2)) # find the largest number of squares we can make with an integer sqrt
+    proc_squares = int(math.pow(math.floor(math.sqrt(count)),2)) # find the largest number of squares we can make with the available processors
+    data_squares = int(math.pow(math.floor(math.sqrt(inner * inner if inner < outer else outer * outer)),2)) # find the largest number of squares we can make with the available data (square the smallest dimension)
+    squares = proc_squares if proc_squares < data_squares else data_squares
     dim_divisor = int(round(math.sqrt(squares))) # we need to divide each dimension by this many to give our desired number of quadrants
     if inner % dim_divisor == 0 and outer % dim_divisor == 0:
         square_dims = [(int(inner / dim_divisor), int(outer / dim_divisor))] * squares
@@ -169,26 +138,31 @@ def split_matrix_dims(dims, count):
         return square_dims
 
 # gets the two matrices that thread 'index' will 'multiply' together. The second matrix will be transposed. FIXME, this needs to give the right dimensions
-def get_split_matrix(mat1, mat2_T, dims, index, mat2_is_transposed):
+def get_split_matrix(mat1, mat2_T, result_dims, dims, index, mat2_is_transposed):
     start_index = 0
     inner_dim, outer_dim = dims[index]
-    for dim in dims[:index]:
+    inner_result, outer_result = result_dims
+    
+    for dim in dims[:index]: # step through what's already taken care of to find where we start
         inner, outer = dim
         start_index += inner
-        if start_index % len(mat1[0]) == 0:
-            start_index += len(mat1[0]) * (outer - 1)
-    mat1_outer_start_index = math.floor(start_index / len(mat1[0]))
-    mat2_outer_start_index = start_index % len(mat1[0])
+        if start_index % inner_result == 0: # at the end of a row of stuff handled by other processes, jump down
+            start_index += inner_result * (outer - 1) # jump down by 'outer', subtracting one to account for the inner we filled up ourselves
+    # start_index is now at the 'top left' of the result matrix, we find the corresponding mat1 start point by finding the row with div, and the corresponding mat2 start point by finding 'column' with modulo
+    mat1_outer_start_index = math.floor(start_index / inner_result)
+    mat2_outer_start_index = start_index % inner_result
+
     return_matrix1 = []
     return_matrix2 = []
-    for i in range(mat1_outer_start_index, mat1_outer_start_index + outer_dim): # loop through outers
-        return_matrix1.append(mat1[i]) # grab the whole inner
-        if not mat2_is_transposed:
-            return_matrix2.append(mat2_T[i]) # if mat2 is not transposed, we can treat it like mat1
-    
-    if mat2_is_transposed: # if mat2 is transposed, we must treat it differently
+    if mat2_is_transposed: # when we're doing multiplication, we need to grab the whole inner. Else, we only grab the relevant elements
+        for i in range(mat1_outer_start_index, mat1_outer_start_index + outer_dim): # loop through outers
+            return_matrix1.append(mat1[i]) # grab the whole inner
         for i in range(mat2_outer_start_index, mat2_outer_start_index + inner_dim):
             return_matrix2.append(mat2_T[i]) # mat2 is transposed, so we grab the inner as well
+    else:
+        for i in range(mat1_outer_start_index, mat1_outer_start_index + outer_dim): # loop through outers
+            return_matrix1.append(mat1[i][mat2_outer_start_index: mat2_outer_start_index + inner_dim]) # grab only the relevant sections
+            return_matrix2.append(mat2_T[i][mat2_outer_start_index: mat2_outer_start_index + inner_dim]) # if mat2 is not transposed, we know it has same dims as mat1
 
     return (return_matrix1, return_matrix2)
 
@@ -200,7 +174,7 @@ def reconstruct_split_matrices(matrices,original_dims):
     for matrix in matrices[1:]: # skip the first matrix because we included it above
         if not matrix:
             continue
-        if outer_offset + 1 < len(reconstructed_matrix): # if we won't exceed the dimensions of our matrix by tacking on more to the existing inners
+        if inner > len(reconstructed_matrix[-1]): # if we won't exceed the dimensions of our matrix by tacking on more to the existing inners
             for i in range(len(matrix)): # for each inner matrix
                 reconstructed_matrix[outer_offset + i].extend(matrix[i]) # append it to the existing inner matrices
             if len(reconstructed_matrix[outer_offset]) == inner: # once we fill up the inners, we need to adjust the outer_offset
@@ -221,7 +195,7 @@ def split_work(mat1, mat2, process_count, transpose_result):
         mat2_T = mat2 # TODO make variable name mat2_T less confusing in cases where it's not actually transposed
     split_mats = []
     for i in range(len(split_dims)):
-        split_mats.append(get_split_matrix(mat1,mat2_T,split_dims,i,transpose_result))
+        split_mats.append(get_split_matrix(mat1,mat2_T,dims,split_dims,i,transpose_result))
 
     return split_mats
     
@@ -236,8 +210,8 @@ def main(argv):
                                     description='Demonstrate performance characteristics of parallel processing')
 
     # Use function pointers so that we can re-use the code which handles parallelism
-    tasks = ['add_vector', 'multiply_vector', 'add_matrix', 'multiply_matrix'] # supported operations
-    task_functions = [add_vector, multiply_vector, add_matrix, multiply_matrix] # functions corresponding to tasks
+    tasks = ['add_matrix', 'multiply_matrix'] # supported operations
+    task_functions = [add_matrix, multiply_matrix] # functions corresponding to tasks
     parser.add_argument('task', choices=tasks, help='Specify what kind of matrix operation to try')
 
     parser.add_argument('process_count', type=int, help='How many worker processes to use')
@@ -266,14 +240,18 @@ def main(argv):
             perf_log.write('\n' + arg)
         perf_log.write(f"\nStart time: {start_time_string}")
 
-    # generate items. For now we assume they are the same size TODO, support non-identical matrices
-    mat1 = generate_matrix(size_inner, size_outer)
-    mat2 = generate_matrix(size_inner, size_outer)
+    # generate matrices
+    dims = (10,10,10) #FIXME take as input
+    result_outer_size, matching_size, result_inner_size = dims
 
-    if task_functions.index(function_pointer) in [1, 3]: # need to transpose mat2 for matrix/vector multiplication
+    mat1 = generate_matrix(matching_size, result_inner_size)
+    
+    if tasks.index(args.task) == 1: # need to transpose mat2 for multiplication
         needs_transposition = True
+        mat2 = generate_matrix(result_outer_size, matching_size)
     else:
         needs_transposition = False
+        mat2 = generate_matrix(matching_size, result_inner_size) # re-use mat1 dims in addition case
 
     result_dims = get_result_dims(mat1, mat2, needs_transposition)
 
@@ -294,7 +272,7 @@ def main(argv):
     # join processes
     for worker in workers:
         worker.join()
-    print('All processes joined!') # report all processes joined. If we don't get here, maybe one of the workers got stuck
+    #print('All processes joined!') # report all processes joined. If we don't get here, maybe one of the workers got stuck
 
     worker_results = []
     for i in range(number_of_processes):
@@ -303,9 +281,6 @@ def main(argv):
 
     # recombine results
     result = reconstruct_split_matrices(worker_results, result_dims)
-
-    if get_matrix_dims(result) != result_dims:
-        print('Dimension error')
 
     # output and record end and elapsed time
     end_time = time.time()
