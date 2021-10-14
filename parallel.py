@@ -213,22 +213,40 @@ def main(argv):
     tasks = ['add_matrix', 'multiply_matrix'] # supported operations
     task_functions = [add_matrix, multiply_matrix] # functions corresponding to tasks
     parser.add_argument('task', choices=tasks, help='Specify what kind of matrix operation to try')
-
     parser.add_argument('process_count', type=int, help='How many worker processes to use')
-
-    parser.add_argument('matrix_size_inner', type=int, help='Size of matrix in terms of inner list size')
-
-    parser.add_argument('matrix_size_outer', nargs='?', type=int, default=1, help='Size of matrix in terms of outer list size (optional)')
+    parser.add_argument('matrix_size_lower_bound', type=int, help='Size of matrix to start at (approximate number of elements)')
+    parser.add_argument('matrix_size_upper_bound', type=int, help='Size of matrix to end at (approximate number of elements)')
+    parser.add_argument('sample_count', nargs='?', type=int, default=2, help='How many samples to take in between lower and upper bounds')
+    #parser.add_argument('matrix_size_outer', nargs='?', type=int, default=1, help='Size of matrix in terms of outer list size (optional)')
 
     args = parser.parse_args(argv)
-
     function_pointer = task_functions[tasks.index(args.task)] # already validated by argparse
-
     number_of_processes = args.process_count
+    matrix_size_lower_bound = args.matrix_size_lower_bound
+    matrix_size_upper_bound = args.matrix_size_upper_bound
+    sample_count = args.sample_count
 
-    size_inner = args.matrix_size_inner
+    if matrix_size_lower_bound > matrix_size_upper_bound:
+        print('Upper bounds must be higher than lower bounds')
+        quit()
+    if matrix_size_lower_bound == matrix_size_upper_bound:
+        sample_count = 1
+        print('Lower and upper bounds are too close, only taking one sample.')
 
-    size_outer = args.matrix_size_outer
+    step = (matrix_size_upper_bound - matrix_size_lower_bound) / sample_count
+    
+    lower_bound_dims = (int(math.sqrt(matrix_size_lower_bound)),int(math.sqrt(matrix_size_lower_bound)),int(math.sqrt(matrix_size_lower_bound)))
+    upper_bound_dims = (int(math.sqrt(matrix_size_upper_bound)),int(math.sqrt(matrix_size_upper_bound)),int(math.sqrt(matrix_size_upper_bound)))
+    test_dims = []
+    test_dims.append(lower_bound_dims)
+    next_size_target = matrix_size_lower_bound + step
+    while next_size_target < matrix_size_upper_bound:
+        if int(math.sqrt(next_size_target)) > test_dims[-1][0]: # don't add duplicates
+            test_dims.append((int(math.sqrt(next_size_target)),int(math.sqrt(next_size_target)),int(math.sqrt(next_size_target)))) # we will use square matrices for now, but we can fine-tune with non-square matrices if we want
+        next_size_target += step
+    if test_dims[-1][0] < upper_bound_dims[0]:
+        test_dims.append(upper_bound_dims)
+
 
     # record and output start time for our records. This will be used to calculate total runtime
     start_time = time.time()
@@ -240,47 +258,57 @@ def main(argv):
             perf_log.write('\n' + arg)
         perf_log.write(f"\nStart time: {start_time_string}")
 
-    # generate matrices
-    dims = (10,10,10) #FIXME take as input
-    result_outer_size, matching_size, result_inner_size = dims
+        perf_log.write('\nPerformance results:\n')
+    # run experiment:
+    for dims in test_dims:
+        iteration_start_time = time.perf_counter_ns()
 
-    mat1 = generate_matrix(matching_size, result_inner_size)
-    
-    if tasks.index(args.task) == 1: # need to transpose mat2 for multiplication
-        needs_transposition = True
-        mat2 = generate_matrix(result_outer_size, matching_size)
-    else:
-        needs_transposition = False
-        mat2 = generate_matrix(matching_size, result_inner_size) # re-use mat1 dims in addition case
+        result_outer_size, matching_size, result_inner_size = dims
 
-    result_dims = get_result_dims(mat1, mat2, needs_transposition)
+        mat1 = generate_matrix(matching_size, result_inner_size)
+        
+        if tasks.index(args.task) == 1: # need to transpose mat2 for multiplication
+            needs_transposition = True
+            mat2 = generate_matrix(result_outer_size, matching_size)
+        else:
+            needs_transposition = False
+            mat2 = generate_matrix(matching_size, result_inner_size) # re-use mat1 dims in addition case
 
-    # # For more complex optimization, we might need to have some more synchronization
-    manager = multiprocessing.Manager()
-    shared_dict = manager.dict() # Processes will write their results to this list
+        result_dims = get_result_dims(mat1, mat2, needs_transposition)
 
-    # Split up the work for each of the workers
-    input_matrices = split_work(mat1, mat2, number_of_processes, transpose_result=needs_transposition)
+        # # For more complex optimization, we might need to have some more synchronization
+        manager = multiprocessing.Manager()
+        shared_dict = manager.dict() # Processes will write their results to this list
 
-    # start worker processes to perform the work
-    workers = []
-    for i in range(number_of_processes): # underscore indicates we do not care about the iterator variable itself
-        workers.append(multiprocessing.Process(target=execute_task, args=(i, function_pointer, shared_dict, input_matrices[i][0], input_matrices[i][1],))) # prepare workers
-    for worker in workers:
-        worker.start() # start workers
+        # Split up the work for each of the workers
+        input_matrices = split_work(mat1, mat2, number_of_processes, transpose_result=needs_transposition)
 
-    # join processes
-    for worker in workers:
-        worker.join()
-    #print('All processes joined!') # report all processes joined. If we don't get here, maybe one of the workers got stuck
+        # start worker processes to perform the work
+        workers = []
+        for i in range(number_of_processes): # underscore indicates we do not care about the iterator variable itself
+            workers.append(multiprocessing.Process(target=execute_task, args=(i, function_pointer, shared_dict, input_matrices[i][0], input_matrices[i][1],))) # prepare workers
+        for worker in workers:
+            worker.start() # start workers
 
-    worker_results = []
-    for i in range(number_of_processes):
-        if i in shared_dict:
-            worker_results.append(shared_dict[i])
+        # join processes
+        for worker in workers:
+            worker.join()
+        #print('All processes joined!') # report all processes joined. If we don't get here, maybe one of the workers got stuck
 
-    # recombine results
-    result = reconstruct_split_matrices(worker_results, result_dims)
+        worker_results = []
+        for i in range(number_of_processes):
+            if i in shared_dict:
+                worker_results.append(shared_dict[i])
+
+        # recombine results
+        result = reconstruct_split_matrices(worker_results, result_dims)
+
+        iteration_end_time = time.perf_counter_ns()
+        iteration_elapsed_time = iteration_end_time - iteration_start_time
+
+        # record iteration performance results to performance log
+        with open(performance_log_file, 'a') as perf_log:
+            perf_log.write(f'{result_outer_size * result_inner_size},{iteration_elapsed_time}\n')
 
     # output and record end and elapsed time
     end_time = time.time()
@@ -288,11 +316,11 @@ def main(argv):
     print(f"End time: {end_time_string}")
 
     elapsed_time = end_time - start_time
-    print(f"Elapsed time: {elapsed_time}")
+    print(f"Total elapsed time: {elapsed_time}")
 
     with open(performance_log_file, 'a') as perf_log:
         perf_log.write(f"\nEnd time: {end_time_string}")
-        perf_log.write(f"\nElapsed time: {elapsed_time}")
+        perf_log.write(f"\nTotal elapsed time: {elapsed_time}")
     
 
 if __name__ == "__main__":
