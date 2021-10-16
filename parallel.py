@@ -228,8 +228,8 @@ def main(argv):
                                     description='Demonstrate performance characteristics of parallel processing')
 
     # Use function pointers so that we can re-use the code which handles parallelism
-    tasks = ['add_matrix', 'multiply_matrix'] # supported operations
-    task_functions = [add_matrix, multiply_matrix] # functions corresponding to tasks
+    tasks = ['add_matrix', 'multiply_matrix', 'multiply_matrix_numpy'] # supported operations
+    task_functions = [add_matrix, multiply_matrix, multiply_matrix_numpy] # functions corresponding to tasks
 
     # define arguments
     parser.add_argument('task', choices=tasks, help='Specify what kind of matrix operation to try')
