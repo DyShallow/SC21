@@ -1,8 +1,7 @@
 # Author: Dylan Shallow
-# SC21 student outreach workshop
-# This program is intended to demonstrate the performance potential of parallelism for certain tasks
+# SC21 HPC Immersion Introduction workshop
+# This program is intended to demonstrate the performance potential of parallelism for certain tasks and examine the performance characteristics of processors
 
-from os import name
 import sys      # accept arguments
 import argparse # parse arguments
 import multiprocessing # use multiprocessing to improve throughput. TODO switch to threads to reduce memory requirements?
