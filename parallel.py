@@ -14,28 +14,38 @@ import math # used for some calculations such as floor and log
 # globals. We group these variables here for easy editing.
 # For variables that will only change rarely, it can be easier to place them here than enter them in as arguments every time we run the program.
 performance_log_file = 'performance_log.txt'
-usage_string = '' # set using argparse in main
 
-# simple usage output. TODO(Dylan): more descriptive, e.g. list and describe each argument
-def usage():
-    print(usage_string)
+# prints a matrix in a nice format
+def print_nicely(mat):
+    print('[', end='')
+    for i in range(len(mat)):
+        if i > 0:
+            print(' ', end='')
+        print('[', end='')
+        for item in mat[i]:
+            print(' {:8}'.format(item), end='')
+        print(']', end='')
+        if i != len(mat) - 1:
+            print(',\n', end='')
+    print(']')
 
-# returns (inner, outer)
+# returns dimensions in a tuple: (inner, outer)
 def get_matrix_dims(matrix):
     if len(matrix) == 0:
         return (0,0)
     return (len(matrix[0]),len(matrix))
 
+# returns the dimensions of the matrix that will result from performing the operation on the two matrices. transposition_required indicates whether it is a multiplication or addition
 def get_result_dims(mat1, mat2, transposition_required):
     mat1_inner, mat1_outer = get_matrix_dims(mat1)
     mat2_inner, mat2_outer = get_matrix_dims(mat2)
     if transposition_required:
-        if mat1_inner != mat2_outer:
+        if mat1_inner != mat2_outer: # if dimensions are invalid, quit. TODO: consider throwing exception instead
             print("mat1 outer and mat2 inner dimensions must be the same")
             quit()
         return (mat2_inner, mat1_outer)
     else:
-        if (mat1_inner, mat1_outer) != (mat2_inner, mat2_outer):
+        if (mat1_inner, mat1_outer) != (mat2_inner, mat2_outer): # if dimensions are invalid, quit. TODO: consider throwing exception instead
             print("mat1 and mat2 dimensions must be the same")
             quit()
         return (mat1_inner, mat1_outer)
@@ -43,7 +53,7 @@ def get_result_dims(mat1, mat2, transposition_required):
 def add_matrix(mat1, mat2_T):
     if not (len(mat1) == len(mat2_T) and len(mat1[0]) == len(mat2_T[0])): # validate inputs
         print('Matrices are not of the same size, cannot add them')
-        quit()
+        quit() # TODO: consider throwing exception instead
     result = []
     for inner_1,inner_2 in zip(mat1, mat2_T): # for each pair of lists in the outer list of each matrix
         inner_result = []
@@ -52,23 +62,26 @@ def add_matrix(mat1, mat2_T):
         result.append(inner_result)
     return result
 
+# wrapper for numpy matrix add function
 def add_matrix_numpy(mat1, mat2):
     return np.add(mat1, mat2)
 
+# wrapper for numpy matrix multiplication (dot product) function
 def multiply_matrix_numpy(mat1, mat2):
-    return np.matmul(mat1, mat2)
+    return np.matmul(mat1, mat2) # per the documentation; for 2-D matrices, np.matmul is preferred over np.dot
 
+# manual matrix multiplication implementation which uses a transposed matrix2 to simplify the programming and improve performance
 def multiply_matrix(mat1, mat2_T):
     inner1, outer1 = get_matrix_dims(mat1)
     inner2, outer2 = get_matrix_dims(mat2_T)
-    result = [ [0 for _ in range(outer2)] for _ in range(outer1)] #[[0] * outer2] * outer1
+    result = [ [0 for _ in range(outer2)] for _ in range(outer1)] # careful instantiating empty matrices or else you might end up with an list of references to a single list
     for i in range(outer1): # outer results
         for j in range(outer2): # inner results
-            for k in range(inner1): # inner1 and inner2 are same
+            for k in range(inner1): # inner1 and inner2 are same length
                 result[i][j] += mat1[i][k] * mat2_T[j][k]
     return result
 
-# also known as Hadamard product. We do this because mat2 is already transposed
+# also known as Hadamard product
 def multiply_matrix_elementwise(mat1, mat2_T):
     result = []
     for inner1, inner2 in zip(mat1,mat2_T):
@@ -78,6 +91,7 @@ def multiply_matrix_elementwise(mat1, mat2_T):
         result.append(inner_result)
     return result
 
+# manual implementation of matrix transposition
 def transpose(mat):
     result = []
     for _ in range(len(mat[0])):
@@ -87,9 +101,11 @@ def transpose(mat):
             result[i].append(element)
     return result
 
+# wrapper for numpy matrix transpose
 def transpose_numpy(mat):
     return np.transpose(mat)
 
+# generate matrix of random ints of specified size. Each element has a value between 1 and 999 inclusive
 def generate_matrix(size_inner, size_outer=1, seed=None):
     rand.seed(seed) # defaults to current system time as seed if seed is None
     generated_matrix = []
@@ -100,6 +116,7 @@ def generate_matrix(size_inner, size_outer=1, seed=None):
         generated_matrix.append(inner_list)
     return generated_matrix
 
+# returns whether all elements in each matrix are identical
 def matrices_equal(mat1, mat2):
     return np.equal(mat1, mat2).all()
 
@@ -137,7 +154,7 @@ def split_matrix_dims(dims, count):
         square_dims.extend(idle)
         return square_dims
 
-# gets the two matrices that thread 'index' will 'multiply' together. The second matrix will be transposed. FIXME, this needs to give the right dimensions
+# gets the two matrices that thread 'index' will 'multiply' together. The second matrix will be transposed.
 def get_split_matrix(mat1, mat2_T, result_dims, dims, index, mat2_is_transposed):
     start_index = 0
     inner_dim, outer_dim = dims[index]
@@ -166,6 +183,7 @@ def get_split_matrix(mat1, mat2_T, result_dims, dims, index, mat2_is_transposed)
 
     return (return_matrix1, return_matrix2)
 
+# taking the pieces of results from each process, recombine them into the final result
 def reconstruct_split_matrices(matrices,original_dims):
     inner, outer = original_dims
     reconstructed_matrix = []
@@ -199,19 +217,22 @@ def split_work(mat1, mat2, process_count, transpose_result):
 
     return split_mats
     
+# calls the indicated function and writes the result to the shared dict unless the matrices are empty, in which case we return
 def execute_task(id, task_function, shared_dict, mat1, mat2_T):
     if mat1 and mat2_T: # if we have work to do
         shared_dict[id] = task_function(mat1, mat2_T)
     return
 
 def main(argv):
-    # Parse arguments
+    # Parse arguments with argparse
     parser = argparse.ArgumentParser(prog='parallel.py',
                                     description='Demonstrate performance characteristics of parallel processing')
 
     # Use function pointers so that we can re-use the code which handles parallelism
     tasks = ['add_matrix', 'multiply_matrix'] # supported operations
     task_functions = [add_matrix, multiply_matrix] # functions corresponding to tasks
+
+    # define arguments
     parser.add_argument('task', choices=tasks, help='Specify what kind of matrix operation to try')
     parser.add_argument('process_count', type=int, help='How many worker processes to use')
     parser.add_argument('matrix_size_lower_bound', type=int, help='Size of matrix to start at (approximate number of elements)')
@@ -219,6 +240,7 @@ def main(argv):
     parser.add_argument('sample_count', nargs='?', type=int, default=2, help='How many samples to take in between lower and upper bounds')
     #parser.add_argument('matrix_size_outer', nargs='?', type=int, default=1, help='Size of matrix in terms of outer list size (optional)')
 
+    # parse arguments
     args = parser.parse_args(argv)
     function_pointer = task_functions[tasks.index(args.task)] # already validated by argparse
     number_of_processes = args.process_count
@@ -226,6 +248,7 @@ def main(argv):
     matrix_size_upper_bound = args.matrix_size_upper_bound
     sample_count = args.sample_count
 
+    # validate inputs
     if matrix_size_lower_bound > matrix_size_upper_bound:
         print('Upper bounds must be higher than lower bounds')
         quit()
@@ -233,8 +256,8 @@ def main(argv):
         sample_count = 1
         print('Lower and upper bounds are too close, only taking one sample.')
 
-    step = (matrix_size_upper_bound - matrix_size_lower_bound) / sample_count
-    
+    # calculate what size matrices we will test
+    step = (matrix_size_upper_bound - matrix_size_lower_bound) / sample_count    
     lower_bound_dims = (int(math.sqrt(matrix_size_lower_bound)),int(math.sqrt(matrix_size_lower_bound)),int(math.sqrt(matrix_size_lower_bound)))
     upper_bound_dims = (int(math.sqrt(matrix_size_upper_bound)),int(math.sqrt(matrix_size_upper_bound)),int(math.sqrt(matrix_size_upper_bound)))
     test_dims = []
@@ -252,19 +275,23 @@ def main(argv):
     start_time = time.time()
     start_time_string = time.strftime("%Y-%m-%dT%H:%M:%S",time.localtime(start_time))
     print(f"Start time: {start_time_string}")
-    with open(performance_log_file, 'a') as perf_log: # record things in a log so that we don't need to copy/paste from terminal, etc. This reduces the chance we lose the data accidentally, which is especially important for programs that take a long time, e.g. hours, to run.
+    # record things in a log so that we don't need to copy/paste from terminal, etc. This reduces the chance we lose the data accidentally, which is especially important for programs that take a long time, e.g. hours, to run.
+    with open(performance_log_file, 'a') as perf_log: # note we are using 'append' mode so previous entries aren't overwritten
         perf_log.write('\n')
         for arg in argv:
             perf_log.write('\n' + arg)
         perf_log.write(f"\nStart time: {start_time_string}")
 
         perf_log.write('\nPerformance results:\n')
+        perf_log.write(f'Cores: {number_of_processes}\n')
+        perf_log.write('elements,execution time (ns)\n')
     # run experiment:
     for dims in test_dims:
-        iteration_start_time = time.perf_counter_ns()
-
+        
+        # We use different size matrices each iteration
         result_outer_size, matching_size, result_inner_size = dims
 
+        # generate our matrices, note we are using ints. The experiment may give more interesting results using floats
         mat1 = generate_matrix(matching_size, result_inner_size)
         
         if tasks.index(args.task) == 1: # need to transpose mat2 for multiplication
@@ -272,13 +299,17 @@ def main(argv):
             mat2 = generate_matrix(result_outer_size, matching_size)
         else:
             needs_transposition = False
-            mat2 = generate_matrix(matching_size, result_inner_size) # re-use mat1 dims in addition case
+            mat2 = generate_matrix(matching_size, result_inner_size) # re-use mat1 dims in addition case, since matrices must have identical dimensions for addition
 
-        result_dims = get_result_dims(mat1, mat2, needs_transposition)
+        # determine what dimensions the result matrix will have
+        result_dims = get_result_dims(mat1, mat2, needs_transposition) 
 
         # # For more complex optimization, we might need to have some more synchronization
         manager = multiprocessing.Manager()
-        shared_dict = manager.dict() # Processes will write their results to this list
+        shared_dict = manager.dict() # Processes will write their results to this dict so we can combine them later into one matrix which is the final result
+
+        # Now that we have generated our matrices and done all of the other experimental setup, we can start our timer
+        iteration_start_time = time.perf_counter_ns()
 
         # Split up the work for each of the workers
         input_matrices = split_work(mat1, mat2, number_of_processes, transpose_result=needs_transposition)
@@ -295,6 +326,7 @@ def main(argv):
             worker.join()
         #print('All processes joined!') # report all processes joined. If we don't get here, maybe one of the workers got stuck
 
+        # move results from dict into a list. TODO this can probably be done with a built-in method
         worker_results = []
         for i in range(number_of_processes):
             if i in shared_dict:
@@ -303,12 +335,18 @@ def main(argv):
         # recombine results
         result = reconstruct_split_matrices(worker_results, result_dims)
 
+        # # we can print our matrices with this function if we want
+        # print_nicely(mat1)
+        # print_nicely(mat2)
+        # print_nicely(result)
+
+        # Once we have our result, we can stop the timer
         iteration_end_time = time.perf_counter_ns()
         iteration_elapsed_time = iteration_end_time - iteration_start_time
 
-        # record iteration performance results to performance log
+        # record iteration timing results to performance log
         with open(performance_log_file, 'a') as perf_log:
-            perf_log.write(f'{result_outer_size * result_inner_size},{iteration_elapsed_time}\n')
+            perf_log.write(f'{result_outer_size * result_inner_size},{iteration_elapsed_time}\n') # Writes the number of elements in the result matrix and the number of nanoseconds that it took to perform the calculation
 
     # output and record end and elapsed time
     end_time = time.time()
