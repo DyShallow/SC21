@@ -22,7 +22,7 @@ def print_nicely(mat):
             print(' ', end='')
         print('[', end='')
         for item in mat[i]:
-            print(' {:8}'.format(item), end='')
+            print(' {:8}'.format(item), end='') # use 8-padding since we are using 3 digit numbers for our generated matrices
         print(']', end='')
         if i != len(mat) - 1:
             print(',\n', end='')
@@ -73,7 +73,7 @@ def multiply_matrix_numpy(mat1, mat2):
 def multiply_matrix(mat1, mat2_T):
     inner1, outer1 = get_matrix_dims(mat1)
     inner2, outer2 = get_matrix_dims(mat2_T)
-    result = [ [0 for _ in range(outer2)] for _ in range(outer1)] # careful instantiating empty matrices or else you might end up with an list of references to a single list
+    result = [[0 for _ in range(outer2)] for _ in range(outer1)] # careful instantiating empty matrices or else you might end up with an list of references to a single list
     for i in range(outer1): # outer results
         for j in range(outer2): # inner results
             for k in range(inner1): # inner1 and inner2 are same length
@@ -186,7 +186,7 @@ def get_split_matrix(mat1, mat2_T, result_dims, dims, index, mat2_is_transposed)
 def reconstruct_split_matrices(matrices,original_dims):
     inner, outer = original_dims
     reconstructed_matrix = []
-    reconstructed_matrix.extend(matrices[0]) # use the first matrix as our building block
+    reconstructed_matrix.extend(matrices[0]) # use the first matrix as our building block.
     outer_offset = 0 # as we fill up blocks of inner matrices, we will need to index from a new 'zero'
     for matrix in matrices[1:]: # skip the first matrix because we included it above
         if not matrix:
@@ -197,7 +197,7 @@ def reconstruct_split_matrices(matrices,original_dims):
             if len(reconstructed_matrix[outer_offset]) == inner: # once we fill up the inners, we need to adjust the outer_offset
                 outer_offset += len(matrix)
         else:
-            reconstructed_matrix.extend(matrix)
+            reconstructed_matrix.extend(matrix) # FIXME numpy breaks here because ndarray doesn't support extend, maybe convert to list first?
 
     return reconstructed_matrix
 
@@ -269,7 +269,6 @@ def main(argv):
     if test_dims[-1][0] < upper_bound_dims[0]:
         test_dims.append(upper_bound_dims)
 
-
     # record and output start time for our records. This will be used to calculate total runtime
     start_time = time.time()
     start_time_string = time.strftime("%Y-%m-%dT%H:%M:%S",time.localtime(start_time))
@@ -282,7 +281,7 @@ def main(argv):
         perf_log.write(f"\nStart time: {start_time_string}")
 
         perf_log.write('\nPerformance results:\n')
-        perf_log.write(f'Cores: {number_of_processes}\n')
+        perf_log.write(f'Processes: {number_of_processes}\n')
         perf_log.write('elements,execution time (ns)\n')
     # run experiment:
     for dims in test_dims:
