@@ -63,11 +63,11 @@ def add_matrix(mat1, mat2_T):
 
 # wrapper for numpy matrix add function
 def add_matrix_numpy(mat1, mat2):
-    return np.add(mat1, mat2)
+    return np.add(mat1, mat2).tolist()
 
 # wrapper for numpy matrix multiplication (dot product) function
 def multiply_matrix_numpy(mat1, mat2):
-    return np.matmul(mat1, mat2) # per the documentation; for 2-D matrices, np.matmul is preferred over np.dot
+    return np.matmul(mat1, mat2).tolist() # per the documentation; for 2-D matrices, np.matmul is preferred over np.dot
 
 # manual matrix multiplication implementation which uses a transposed matrix2 to simplify the programming and improve performance
 def multiply_matrix(mat1, mat2_T):
@@ -219,6 +219,8 @@ def split_work(mat1, mat2, process_count, transpose_result):
 # calls the indicated function and writes the result to the shared dict unless the matrices are empty, in which case we return
 def execute_task(id, task_function, shared_dict, mat1, mat2_T):
     if mat1 and mat2_T: # if we have work to do
+        if task_function == multiply_matrix_numpy:
+            mat2_T = transpose_numpy(mat2_T) # split_work logic depends on input matrix2 being transposed, which is a bit ugly. Thus, we have to un-transpose it here.
         shared_dict[id] = task_function(mat1, mat2_T)
     return
 
@@ -292,7 +294,7 @@ def main(argv):
         # generate our matrices, note we are using ints. The experiment may give more interesting results using floats
         mat1 = generate_matrix(matching_size, result_inner_size)
         
-        if tasks.index(args.task) == 1: # need to transpose mat2 for multiplication
+        if tasks.index(args.task) in [1,2]: # need to transpose mat2 for multiplication (split work also uses this flag for adjacent reasons unfortunately TODO: remove coupling)
             needs_transposition = True
             mat2 = generate_matrix(result_outer_size, matching_size)
         else:
