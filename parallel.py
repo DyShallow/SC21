@@ -11,7 +11,7 @@ import numpy as np
 import math # used for some calculations such as floor and log
 
 # globals. We group these variables here for easy editing.
-# For variables that will only change rarely, it can be easier to place them here than enter them in as arguments every time we run the program.
+# For variables that will only change rarely, it can be easier to place them here than to enter them in as arguments every time we run the program.
 performance_log_file = 'performance_log.txt'
 
 # prints a matrix in a nice format
@@ -316,7 +316,7 @@ def main(argv):
 
         # start worker processes to perform the work
         workers = []
-        for i in range(number_of_processes): # underscore indicates we do not care about the iterator variable itself
+        for i in range(number_of_processes):
             workers.append(multiprocessing.Process(target=execute_task, args=(i, function_pointer, shared_dict, input_matrices[i][0], input_matrices[i][1],))) # prepare workers
         for worker in workers:
             worker.start() # start workers
