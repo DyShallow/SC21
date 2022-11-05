@@ -276,6 +276,7 @@ def main(argv):
     start_time_string = time.strftime("%Y-%m-%dT%H:%M:%S",time.localtime(start_time))
     print(f"Start time: {start_time_string}")
     # record things in a log so that we don't need to copy/paste from terminal, etc. This reduces the chance we lose the data accidentally, which is especially important for programs that take a long time, e.g. hours, to run.
+    # TODO output in a nice csv format
     with open(performance_log_file, 'a') as perf_log: # note we are using 'append' mode so previous entries aren't overwritten
         perf_log.write('\n')
         for arg in argv:
